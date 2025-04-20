@@ -55,6 +55,8 @@ io.on('connection', (socket) => {
     sessions.set(sessionId, {
       desktop: socket.id,
       mobile: null,
+      ready: false,
+      pendingSignals: [], // Buffer for early signals
       created: Date.now(),
       timeout: setTimeout(() => {
         // Remove session after timeout
@@ -84,6 +86,8 @@ io.on('connection', (socket) => {
         
         // Update session with mobile socket id
         session.mobile = socket.id;
+        // Mark session as ready
+        session.ready = true;
         
         console.log('✅ Mobile connected to session:', sessionId);
         
@@ -92,6 +96,15 @@ io.on('connection', (socket) => {
         
         // Notify mobile that connection is successful
         socket.emit('connection-successful');
+
+        // Send any pending signals
+        if (session.pendingSignals.length > 0) {
+          console.log('Sending pending signals:', session.pendingSignals.length);
+          session.pendingSignals.forEach(signal => {
+            io.to(signal.targetId).emit('signal', { signal: signal.data });
+          });
+          session.pendingSignals = [];
+        }
       }
     } else {
       console.log('❌ Session not found:', sessionId);
@@ -107,6 +120,13 @@ io.on('connection', (socket) => {
       if (session) {
         const targetId = socket.id === session.desktop ? session.mobile : session.desktop;
         
+        if (!session.ready) {
+          // Buffer the signal if session isn't ready
+          console.log('⏳ Buffering early signal');
+          session.pendingSignals.push({ targetId, data: signal });
+          return;
+        }
+
         if (targetId) {
           console.log('✅ Forwarding signal to:', targetId);
           io.to(targetId).emit('signal', { signal });
